@@ -1,0 +1,94 @@
+// Synthetic schema shaped like the one embedded in .fig files (subset).
+// Only used for tests; real schemas are always read from the file itself.
+
+enum MessageType {
+  JOIN_START = 0;
+  NODE_CHANGES = 1;
+}
+
+enum NodeType {
+  NONE = 0;
+  DOCUMENT = 1;
+  CANVAS = 2;
+  GROUP = 3;
+  FRAME = 4;
+  RECTANGLE = 10;
+  TEXT = 13;
+}
+
+enum PaintType {
+  SOLID = 0;
+  GRADIENT_LINEAR = 1;
+  IMAGE = 5;
+}
+
+struct GUID {
+  uint sessionID;
+  uint localID;
+}
+
+struct Color {
+  float r;
+  float g;
+  float b;
+  float a;
+}
+
+struct Vector {
+  float x;
+  float y;
+}
+
+struct Matrix {
+  float m00;
+  float m01;
+  float m02;
+  float m10;
+  float m11;
+  float m12;
+}
+
+message ParentIndex {
+  GUID guid = 1;
+  string position = 2;
+}
+
+message Paint {
+  PaintType type = 1;
+  Color color = 2;
+  float opacity = 3;
+  bool visible = 4;
+}
+
+message TextData {
+  string characters = 1;
+  uint[] lines = 2;
+}
+
+message NodeChange {
+  GUID guid = 1;
+  ParentIndex parentIndex = 2;
+  NodeType type = 3;
+  string name = 4;
+  bool visible = 5;
+  float opacity = 6;
+  Vector size = 7;
+  Matrix transform = 8;
+  Paint[] fillPaints = 9;
+  TextData textData = 10;
+  int cornerRadiusDelta = 11;
+  int64 sessionTimestamp = 12;
+  uint64 objectHash = 13;
+}
+
+message Blob {
+  byte[] bytes = 1;
+}
+
+message Message {
+  MessageType type = 1;
+  uint sessionID = 2;
+  uint ackID = 3;
+  NodeChange[] nodeChanges = 4;
+  Blob[] blobs = 5;
+}

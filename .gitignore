@@ -1,0 +1,5 @@
+node_modules/
+dist/
+fixtures/*.fig
+fixtures/out/
+.DS_Store

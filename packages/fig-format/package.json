@@ -1,0 +1,13 @@
+{
+  "name": "@figref/fig-format",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@figref/kiwi": "workspace:*",
+    "@figref/model": "workspace:*",
+    "fflate": "0.8.2",
+    "fzstd": "0.1.1"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@figref/fig-inspect",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@figref/fig-format": "workspace:*",
+    "@figref/kiwi": "workspace:*"
+  }
+}
