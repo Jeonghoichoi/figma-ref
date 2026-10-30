@@ -3,3 +3,4 @@ export * from "./container";
 export * from "./fig-file";
 export * from "./json";
 export * from "./mapping";
+export * from "./prune";

@@ -7,6 +7,7 @@ import { useEditor } from "./editor/useEditor";
 import { createFig, download, importFig, openStored, persist, type OpenFile } from "./home/files";
 import { Home } from "./home/Home";
 import { getBytes, getFile, listFiles, rememberSchema, renameFile } from "./home/library";
+import { renderThumbnail } from "./home/thumbnail";
 import type { Preset } from "./home/presets";
 import { Inspector } from "./Inspector";
 import { LayerPanel } from "./LayerPanel";
@@ -189,6 +190,14 @@ export function App() {
       editor,
       open,
       save,
+      /** The page thumbnail as base64 PNG (what saves embed as thumbnail.png). */
+      thumbnail: async () => {
+        const blob = await renderThumbnail(editor, images.current);
+        const bytes = new Uint8Array(await blob!.arrayBuffer());
+        let bin = "";
+        for (const b of bytes) bin += String.fromCharCode(b);
+        return btoa(bin);
+      },
       /** Saves to .fig bytes and reopens them, like a save + reload would. */
       roundtrip: () => {
         const bytes = encodeFig(documentToFig(editor.doc));

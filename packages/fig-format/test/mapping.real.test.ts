@@ -22,20 +22,24 @@ describe.each(files)("%s", (name) => {
     expect(out.message.blobs).toEqual(fig.message.blobs);
   });
 
+  // Samples differ in content, so each check runs only when the sample has that kind of node.
   it("decodes the shapes seen in the sample into model values", () => {
     expect(nodes.filter((n) => n.type === "UNKNOWN")).toEqual([]);
-    expect(find((n) => n.name.startsWith("Group"))?.type).toBe("GROUP");
     expect(find((n) => n.type === "FRAME")?.clipsContent).toBe(true);
+    for (const g of nodes.filter((n) => /^Group \d+$/.test(n.name))) expect(g.type, g.name).toBe("GROUP");
 
-    const text = find((n) => n.type === "TEXT")!;
-    expect(text.text!.style).toMatchObject({ fontFamily: "Noto Sans KR", fontStyle: "Black" });
-    expect(text.text!.characters.length).toBeGreaterThan(0);
+    for (const text of nodes.filter((n) => n.type === "TEXT")) {
+      expect(text.text!.style.fontFamily.length).toBeGreaterThan(0);
+      expect(text.text!.characters.length).toBeGreaterThan(0);
+      expect(text.textLayout?.glyphs.length).toBeGreaterThan(0);
+    }
 
-    const image = nodes.flatMap((n) => n.fills).find((p): p is Extract<Paint, { type: "IMAGE" }> => p.type === "IMAGE")!;
-    expect(doc.images.has(image.imageHash)).toBe(true);
+    for (const image of nodes.flatMap((n) => n.fills).filter((p): p is Extract<Paint, { type: "IMAGE" }> => p.type === "IMAGE")) {
+      expect(doc.images.has(image.imageHash)).toBe(true);
+    }
 
-    const star = find((n) => n.type === "STAR")!;
-    expect(star.fillGeometry![0]!.commands.filter((c) => c.op === "L")).toHaveLength(10);
+    const star = find((n) => n.type === "STAR");
+    if (star) expect(star.fillGeometry![0]!.commands.filter((c) => c.op === "L")).toHaveLength(10);
   });
 
   it("an edit rewrites only the edited node", () => {

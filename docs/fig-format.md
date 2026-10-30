@@ -7,6 +7,9 @@
 > - `fixtures/sample.fig`: 16 MB, 노드 22개 (이미지 5개, 별 1개)
 > - `fixtures/sample222.fig`: 노드 37개. 위 파일에 "Frame 4"를 추가한 것 (펜 곡선, 그라디언트, 오토 레이아웃, 컴포넌트, 그룹, 꺾은선)
 > - `fixtures/sample333.fig`: 노드 53개. "Frame 5" 추가 (선, 불리언 연산, 컴포넌트 세트, 드롭 섀도)
+>
+> 2026-10-30: 개인 내용이 들어 있던 Frame 1·2를 세 샘플 모두에서 삭제했다 (`pnpm inspect --remove-node`, 쓰이지 않게 된 blob·이미지·썸네일까지 정리).
+> 이 문서의 텍스트·이미지 관련 관찰(글리프 외곽선, 이미지 SHA-1 등)은 삭제 전 파일에서 나온 것이다.
 > 회귀 테스트: [real-files.test.ts](../packages/fig-format/test/real-files.test.ts). `fixtures/*.fig`에 있는 모든 파일에 대해 실행된다.
 
 ## 1. 컨테이너
@@ -231,6 +234,10 @@ region  × R: ❓ (샘플에 region이 0개라 아직 미해독)
 
 ```bash
 pnpm inspect fixtures/<name>.fig --out fixtures/out/<name> --roundtrip
+# 노드 삭제: 하위 노드, 쓰이지 않게 된 blob(글리프·경로)과 images/, 썸네일까지 함께 지운다
+pnpm inspect fixtures/<name>.fig --remove-node 7:2 --remove-node 16:20 --write fixtures/<name>.fig
+# 썸네일 다시 그리기 (pnpm dev 실행 중)
+pnpm tsx apps/editor/e2e/sample-thumbnails.mjs <name>.fig
 ```
 
 출력: `schema.kiwi` (전체 스키마), `field-usage.json` (필드 사용 빈도), `message.json`, `tree.txt`, `meta.json`

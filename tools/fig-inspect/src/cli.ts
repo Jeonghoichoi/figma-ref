@@ -3,10 +3,13 @@
 //   pnpm inspect <file.fig>                    summary
 //   pnpm inspect <file.fig> --out <dir>        + schema.kiwi, message.json, field-usage.json, tree.txt
 //   pnpm inspect <file.fig> --roundtrip        decode → encode → decode and report differences
+//   pnpm inspect <file.fig> --remove-node 7:2 [--remove-node …] --write <out.fig>
+//                                              delete subtrees (plus now-unused blobs, images
+//                                              and the thumbnail) and write the result
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
-import { decodeFig, encodeFig, isZip, toJSONValue } from "@figref/fig-format";
+import { decodeFig, encodeFig, isZip, pruneFig, toJSONValue } from "@figref/fig-format";
 import { printSchema } from "@figref/kiwi";
 
 const { values, positionals } = parseArgs({
@@ -15,12 +18,14 @@ const { values, positionals } = parseArgs({
     out: { type: "string" },
     roundtrip: { type: "boolean", default: false },
     "max-bytes": { type: "string", default: "64" },
+    "remove-node": { type: "string", multiple: true },
+    write: { type: "string" },
   },
 });
 
 const file = positionals[0];
 if (!file) {
-  console.error("usage: fig-inspect <file.fig> [--out dir] [--roundtrip] [--max-bytes n]");
+  console.error("usage: fig-inspect <file.fig> [--out dir] [--roundtrip] [--max-bytes n] [--remove-node id … --write out.fig]");
   process.exit(2);
 }
 
@@ -71,6 +76,18 @@ if (values.out) {
 
   writeFileSync(join(out, "tree.txt"), renderTree(nodes));
   console.log(`\nwrote schema.kiwi, message.json, field-usage.json, tree.txt${fig.zip?.meta !== undefined ? ", meta.json" : ""} → ${out}`);
+}
+
+if (values["remove-node"]?.length) {
+  if (!values.write) {
+    console.error("--remove-node needs --write <out.fig>");
+    process.exit(2);
+  }
+  const { fig: pruned, removedNodes, removedBlobs, removedImages } = pruneFig(fig, values["remove-node"]);
+  const out = encodeFig(pruned);
+  writeFileSync(values.write, out);
+  console.log(`\nremoved      ${removedNodes} nodes, ${removedBlobs} blobs, ${removedImages.length} images${fig.zip?.thumbnail ? ", thumbnail" : ""}`);
+  console.log(`wrote        ${values.write} (${out.length.toLocaleString()} bytes)`);
 }
 
 if (values.roundtrip) {
