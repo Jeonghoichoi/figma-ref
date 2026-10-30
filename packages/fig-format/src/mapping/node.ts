@@ -1,4 +1,4 @@
-import { IDENTITY, type Geometry, type Node, type NodeId, type NodeType, type TextStyle } from "@figref/model";
+import { IDENTITY, type Geometry, type Node, type NodeId, type NodeType, type TextLayout, type TextStyle } from "@figref/model";
 import { deepEqual } from "./equal";
 import { decodeEffect, decodePaint, encodeEffect, encodePaint } from "./paint";
 import { decodePathBlob, encodePathBlob } from "./path";
@@ -132,6 +132,27 @@ function writeText(value: Node["text"], out: Raw, raw: Raw): void {
   if (!before || !deepEqual(before, value)) delete out.derivedTextData;
 }
 
+function readTextLayout(raw: Raw, t: BlobTable): TextLayout | undefined {
+  const glyphs = raw.derivedTextData?.glyphs as Raw[] | undefined;
+  if (raw.type !== "TEXT" || !glyphs) return undefined;
+  const styleFills: TextLayout["styleFills"] = {};
+  for (const o of (raw.textData?.styleOverrideTable ?? []) as Raw[]) {
+    if (o.styleID !== undefined && o.fillPaints) styleFills[o.styleID] = o.fillPaints.map(decodePaint);
+  }
+  return {
+    glyphs: glyphs
+      .filter((g) => t.blobs[g.commandsBlob])
+      .map((g) => ({
+        commands: decodePathBlob(t.blobs[g.commandsBlob]!.bytes),
+        x: g.position?.x ?? 0,
+        y: g.position?.y ?? 0,
+        fontSize: g.fontSize ?? raw.fontSize ?? 12,
+        styleID: g.styleID ?? 0,
+      })),
+    styleFills,
+  };
+}
+
 interface FieldMapping<K extends keyof Node> {
   key: K;
   read(raw: Raw, t: BlobTable): Node[K];
@@ -205,6 +226,8 @@ const MAPPINGS: FieldMapping<any>[] = [
     else delete out.strokeGeometry;
   }),
   field("text", readText, (v, out, raw) => writeText(v, out, raw)),
+  // Derived from derivedTextData; writeText already drops that on edits, so nothing to write.
+  field("textLayout", readTextLayout, () => {}),
   field(
     "componentId",
     (raw) => (raw.symbolData?.symbolID ? guidToId(raw.symbolData.symbolID) : undefined),

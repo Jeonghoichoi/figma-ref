@@ -85,11 +85,24 @@ fillGeometry: [{ windingRule: NONZERO, commandsBlob: 48 }]
 ### 경로 blob (`commandsBlob`) ✅
 
 `blobs[i].bytes` = `[cmd byte][float32 LE 좌표...]` 반복:
-`0` close · `1` moveTo(x,y) · `2` lineTo(x,y) · `3` quadTo(4개) 🟡 · `4` cubicTo(6개) ✅
+`0` close · `1` moveTo(x,y) · `2` lineTo(x,y) · `3` quadTo(4개) ✅ · `4` cubicTo(6개) ✅
 
 - 원(ellipse)은 cubic 4개로 저장된다. (예: `M120,60 C120,93.1,93.1,120,60,120 …`) ✅
 - **`strokeGeometry`는 선의 중심선이 아니라 선 두께만큼 부풀린 외곽선(채울 도형)이다.** 펜 경로의 stroke가 두께 1짜리 폐곡선 여러 개로 저장된다. ✅ → 렌더러는 stroke를 그릴 때 `strokeGeometry`를 *채우면* 되고, 편집할 때는 `vectorNetworkBlob`을 쓴다.
-- quadTo(`3`)는 아직 실제 파일에서 관찰되지 않았다 🟡
+- quadTo(`3`): 텍스트 글리프 외곽선에서 확인 ✅
+
+### 텍스트 글리프 (`derivedTextData`) ✅
+
+텍스트는 원본 앱이 배치한 결과를 함께 저장한다. 그래서 폰트가 없어도 원본과 똑같이 그릴 수 있다.
+
+```
+derivedTextData.glyphs[]: { commandsBlob, position{x,y}, fontSize, styleID, firstCharacter, advance }
+derivedTextData.baselines[]: { position, width, lineY, lineHeight, lineAscent, firstCharacter, endCharacter }
+```
+
+- 글리프 외곽선은 **em 단위이고 y축이 위쪽**이다 ("A": x 0..0.668, y 0..0.745). → `translate(position)` + `scale(fontSize, -fontSize)`로 그린다.
+- 공백 글리프는 close 명령 하나뿐이다.
+- `styleID`가 0이 아니면 `textData.styleOverrideTable[]`의 같은 `styleID` 항목에 있는 `fillPaints`를 쓴다 (여러 색이 섞인 텍스트).
 
 ### 벡터 네트워크 (`vectorData.vectorNetworkBlob`) ✅
 

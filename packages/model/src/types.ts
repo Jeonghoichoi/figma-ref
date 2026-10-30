@@ -105,6 +105,23 @@ export interface TextStyle {
   textAlignVertical: "TOP" | "CENTER" | "BOTTOM";
 }
 
+export interface Glyph {
+  /** Outline in em units, y up. */
+  commands: PathCommand[];
+  /** Baseline origin in node space. */
+  x: number;
+  y: number;
+  fontSize: number;
+  /** 0 = node fills; otherwise a key of TextLayout.styleFills. */
+  styleID: number;
+}
+
+export interface TextLayout {
+  glyphs: Glyph[];
+  /** Per-run fill overrides (mixed-color text). */
+  styleFills: Record<number, Paint[]>;
+}
+
 export interface Node {
   id: NodeId;
   type: NodeType;
@@ -135,6 +152,12 @@ export interface Node {
   strokeGeometry?: Geometry[];
 
   text?: { characters: string; style: TextStyle };
+  /**
+   * Laid-out glyph outlines as computed by the authoring app. Derived and
+   * read-only: never saved, and must be dropped when text or style is edited
+   * (renderers fall back to live font rendering).
+   */
+  textLayout?: TextLayout;
 
   /** INSTANCE → the SYMBOL it instantiates. */
   componentId?: NodeId;
