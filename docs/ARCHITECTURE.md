@@ -15,7 +15,7 @@
 | 2 | 포맷 리버스 엔지니어링 ✅ | `@figref/kiwi`, `@figref/fig-format`, `tools/fig-inspect`, [fig-format.md](fig-format.md) |
 | 3 | 파서/시리얼라이저 ✅ | `.fig` NodeChange ⇄ 내부 모델 매핑 ([mapping/](../packages/fig-format/src/mapping/)) |
 | 4 | 렌더링 엔진 ✅ | `@figref/renderer` (Canvas2D) + `apps/editor` 뷰어 |
-| 5 | 에디터 | `apps/editor` (React + Vite) |
+| 5 | 에디터 ✅ | `apps/editor` (React + Vite): 도구, 선택/이동/크기 조절, 그룹, 실행 취소, 속성·레이어 편집 |
 | 6 | 고급 기능 | 오토 레이아웃, 컴포넌트/인스턴스, 제약, SVG/PNG 내보내기 |
 | 7 | 데이터 호환성 검증 | 왕복 diff, 스키마 버전 diff, 픽셀 비교 테스트 |
 

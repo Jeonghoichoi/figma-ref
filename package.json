@@ -6,7 +6,8 @@
     "dev": "pnpm --filter @figref/editor dev",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "inspect": "tsx tools/fig-inspect/src/cli.ts"
+    "inspect": "tsx tools/fig-inspect/src/cli.ts",
+    "e2e": "node apps/editor/e2e/editor.e2e.mjs"
   },
   "devDependencies": {
     "@types/node": "22.10.2",

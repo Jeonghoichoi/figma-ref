@@ -14,7 +14,20 @@ export interface RenderOptions {
   selection?: ReadonlySet<NodeId>;
   hover?: NodeId | null;
   background?: string;
+  /** Draw resize handles around a single selection. */
+  handles?: boolean;
+  /** Rubber-band selection rectangle, world space. */
+  marquee?: Rect | null;
+  /** Nodes not drawn by the scene (e.g. text being edited in an overlay). */
+  hidden?: ReadonlySet<NodeId>;
 }
+
+export type HandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+export const HANDLES: { id: HandleId; u: number; v: number }[] = [
+  { id: "nw", u: 0, v: 0 }, { id: "n", u: 0.5, v: 0 }, { id: "ne", u: 1, v: 0 }, { id: "e", u: 1, v: 0.5 },
+  { id: "se", u: 1, v: 1 }, { id: "s", u: 0.5, v: 1 }, { id: "sw", u: 0, v: 1 }, { id: "w", u: 0, v: 0.5 },
+];
+const HANDLE_SIZE = 8;
 
 export interface Rect {
   x: number;
@@ -30,7 +43,9 @@ const SELECTION = "#0d99ff";
  * geometry queries (hit testing, bounds) against the same transforms.
  */
 export class Renderer {
-  private children = new Map<NodeId, Node[]>();
+  // Ids, not Node objects: editors replace node objects on every edit, and
+  // only structural changes (insert/move/remove/reorder) need invalidate().
+  private children = new Map<NodeId, NodeId[]>();
 
   constructor(private doc: Document) {
     this.invalidate();
@@ -38,11 +53,16 @@ export class Renderer {
 
   /** Call after any structural change (insert/move/remove). */
   invalidate(): void {
-    this.children = buildChildIndex(this.doc);
+    this.children = new Map([...buildChildIndex(this.doc)].map(([k, v]) => [k, v.map((n) => n.id)]));
   }
 
   childrenOf(id: NodeId): Node[] {
-    return this.children.get(id) ?? [];
+    const out: Node[] = [];
+    for (const c of this.children.get(id) ?? []) {
+      const n = this.doc.nodes.get(c);
+      if (n) out.push(n);
+    }
+    return out;
   }
 
   render(ctx: CanvasRenderingContext2D, pageId: NodeId, view: Viewport, opts: RenderOptions): void {
@@ -61,11 +81,20 @@ export class Renderer {
     this.drawFrameLabels(ctx, pageId, view, opts);
     if (opts.hover && !opts.selection?.has(opts.hover)) this.outline(ctx, opts.hover, view, 1);
     for (const id of opts.selection ?? []) this.outline(ctx, id, view, 1.5);
+    if (opts.handles && opts.selection?.size === 1) this.drawHandles(ctx, [...opts.selection][0]!, view);
+    if (opts.marquee) {
+      const m = opts.marquee;
+      ctx.fillStyle = "rgba(13, 153, 255, 0.08)";
+      ctx.strokeStyle = SELECTION;
+      ctx.lineWidth = 1;
+      ctx.fillRect(m.x * view.zoom + view.x, m.y * view.zoom + view.y, m.w * view.zoom, m.h * view.zoom);
+      ctx.strokeRect(m.x * view.zoom + view.x + 0.5, m.y * view.zoom + view.y + 0.5, m.w * view.zoom, m.h * view.zoom);
+    }
     ctx.restore();
   }
 
   private drawNode(ctx: CanvasRenderingContext2D, node: Node, opts: RenderOptions): void {
-    if (!node.visible || node.opacity <= 0) return;
+    if (!node.visible || node.opacity <= 0 || opts.hidden?.has(node.id)) return;
     ctx.save();
     applyTransform(ctx, node.transform);
     ctx.globalAlpha *= node.opacity;
@@ -77,6 +106,8 @@ export class Renderer {
 
     if (node.type === "TEXT") {
       this.drawText(ctx, node, opts);
+    } else if (node.type === "BOOLEAN_OPERATION" && !node.fillGeometry?.length) {
+      this.drawBooleanLive(ctx, node, opts);
     } else {
       const paths = fillPaths(node);
       this.drawFills(ctx, node, paths, opts);
@@ -90,6 +121,41 @@ export class Renderer {
       }
       this.drawStrokes(ctx, node, paths, opts);
     }
+    ctx.restore();
+  }
+
+  /**
+   * A boolean whose stored result went stale (an operand was edited) is
+   * composited from its operands: union = over, subtract = destination-out,
+   * intersect = destination-in, exclude = xor. The mask then clips the fills.
+   */
+  private drawBooleanLive(ctx: CanvasRenderingContext2D, node: Node, opts: RenderOptions): void {
+    const op = (node.raw?.booleanOperation as string | undefined) ?? "UNION";
+    const { width, height } = ctx.canvas;
+    const mask = new OffscreenCanvas(width, height);
+    const m = mask.getContext("2d")!;
+    m.setTransform(ctx.getTransform());
+    this.childrenOf(node.id).filter((c) => c.visible).forEach((child, i) => {
+      m.globalCompositeOperation =
+        i === 0 || op === "UNION" ? "source-over" : op === "SUBTRACT" ? "destination-out" : op === "INTERSECT" ? "destination-in" : "xor";
+      const t = child.transform;
+      const path = new Path2D();
+      for (const p of fillPaths(child)) path.addPath(p.path, new DOMMatrix([t.m00, t.m10, t.m01, t.m11, t.m02, t.m12]));
+      m.fillStyle = "#000";
+      m.fill(path);
+    });
+    const layer = new OffscreenCanvas(width, height);
+    const l = layer.getContext("2d")!;
+    l.setTransform(ctx.getTransform());
+    const rect = new Path2D();
+    rect.rect(-1e6, -1e6, 2e6, 2e6);
+    for (const paint of node.fills) fillWithPaint(l as unknown as CanvasRenderingContext2D, paint, node.size, [{ path: rect, rule: "nonzero" }], opts.images);
+    l.setTransform(1, 0, 0, 1, 0, 0);
+    l.globalCompositeOperation = "destination-in";
+    l.drawImage(mask, 0, 0);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(layer, 0, 0);
     ctx.restore();
   }
 
@@ -178,14 +244,54 @@ export class Renderer {
     });
   }
 
+  /** Screen rects of the frame name labels from the last render (labels are drag handles for frames). */
+  private labelRects: { id: NodeId; x: number; y: number; w: number; h: number }[] = [];
+
   private drawFrameLabels(ctx: CanvasRenderingContext2D, pageId: NodeId, view: Viewport, opts: RenderOptions): void {
     ctx.font = "11px system-ui, sans-serif";
     ctx.textBaseline = "bottom";
+    this.labelRects = [];
     for (const n of this.childrenOf(pageId)) {
       if (!n.visible || !["FRAME", "SYMBOL", "INSTANCE", "SECTION"].includes(n.type)) continue;
       const p = apply(n.transform, 0, 0);
+      const x = p.x * view.zoom + view.x, y = p.y * view.zoom + view.y - 4;
       ctx.fillStyle = opts.selection?.has(n.id) ? SELECTION : "#808080";
-      ctx.fillText(n.name, p.x * view.zoom + view.x, p.y * view.zoom + view.y - 4);
+      ctx.fillText(n.name, x, y);
+      this.labelRects.push({ id: n.id, x, y: y - 14, w: ctx.measureText(n.name).width, h: 14 });
+    }
+  }
+
+  /** Frame whose name label is at a screen point (front-most first). */
+  frameLabelAt(sx: number, sy: number): NodeId | null {
+    for (let i = this.labelRects.length - 1; i >= 0; i--) {
+      const r = this.labelRects[i]!;
+      if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return r.id;
+    }
+    return null;
+  }
+
+  /** Screen-space positions of the resize handles of `id`. */
+  handlePositions(id: NodeId, view: Viewport): { id: HandleId; x: number; y: number }[] {
+    const node = this.doc.nodes.get(id);
+    if (!node) return [];
+    const t = this.worldTransform(id);
+    return HANDLES.map((h) => {
+      const p = apply(t, h.u * node.size.x, h.v * node.size.y);
+      return { id: h.id, x: p.x * view.zoom + view.x, y: p.y * view.zoom + view.y };
+    });
+  }
+
+  private drawHandles(ctx: CanvasRenderingContext2D, id: NodeId, view: Viewport): void {
+    const node = this.doc.nodes.get(id);
+    if (!node || node.locked) return;
+    // Lines only get their two end handles.
+    const handles = this.handlePositions(id, view).filter((h) => node.type !== "LINE" || h.id === "w" || h.id === "e");
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = SELECTION;
+    ctx.lineWidth = 1;
+    for (const h of handles) {
+      ctx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+      ctx.strokeRect(h.x - HANDLE_SIZE / 2 + 0.5, h.y - HANDLE_SIZE / 2 + 0.5, HANDLE_SIZE - 1, HANDLE_SIZE - 1);
     }
   }
 
@@ -228,10 +334,23 @@ export class Renderer {
     return { x, y, w: Math.max(...rects.map((r) => r.x + r.w)) - x, h: Math.max(...rects.map((r) => r.y + r.h)) - y };
   }
 
+  /**
+   * Chain from the page's child down to the deepest visible, unlocked node
+   * under a world-space point (empty if nothing is hit). Editors pick which
+   * level of the chain a click selects.
+   */
+  hitPath(pageId: NodeId, x: number, y: number, exclude?: ReadonlySet<NodeId>): Node[] {
+    const leaf = this.hitTest(pageId, x, y, exclude);
+    if (!leaf) return [];
+    const chain: Node[] = [];
+    for (let n = this.doc.nodes.get(leaf); n && n.id !== pageId; n = n.parentId ? this.doc.nodes.get(n.parentId) : undefined) chain.unshift(n);
+    return chain;
+  }
+
   /** Topmost, deepest visible node under a world-space point. */
-  hitTest(pageId: NodeId, x: number, y: number): NodeId | null {
+  hitTest(pageId: NodeId, x: number, y: number, exclude?: ReadonlySet<NodeId>): NodeId | null {
     const visit = (node: Node, parent: Transform): NodeId | null => {
-      if (!node.visible) return null;
+      if (!node.visible || node.locked || exclude?.has(node.id)) return null;
       const t = multiply(parent, node.transform);
       const p = apply(invert(t), x, y);
       const tol = 4; // lines have zero height

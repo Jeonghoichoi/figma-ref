@@ -12,7 +12,13 @@ enum NodeType {
   CANVAS = 2;
   GROUP = 3;
   FRAME = 4;
+  BOOLEAN_OPERATION = 5;
+  VECTOR = 6;
+  STAR = 7;
+  LINE = 8;
+  ELLIPSE = 9;
   RECTANGLE = 10;
+  ROUNDED_RECTANGLE = 12;
   TEXT = 13;
 }
 
