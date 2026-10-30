@@ -1,13 +1,15 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
+import { unzipSync } from "fflate";
 import { defineConfig, type Plugin } from "vite";
 
 const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
 
 /**
- * Dev-only: lists fixtures/*.fig at /__fixtures and serves them at
- * /__fixtures/<name>, so local samples open with one click. Not part of builds.
+ * Dev-only: lists fixtures/*.fig at /__fixtures, serves them at
+ * /__fixtures/<name> and their embedded thumbnails at /__fixtures/<name>/thumbnail,
+ * so local samples show up in the file browser. Not part of builds.
  */
 function fixtures(): Plugin {
   return {
@@ -18,10 +20,29 @@ function fixtures(): Plugin {
         const name = decodeURIComponent((req.url ?? "/").slice(1));
         if (!name) {
           const files = existsSync(FIXTURES)
-            ? readdirSync(FIXTURES).filter((f) => f.endsWith(".fig")).map((f) => ({ name: f, size: statSync(FIXTURES + f).size }))
+            ? readdirSync(FIXTURES)
+                .filter((f) => f.endsWith(".fig") && f !== "synthetic.fig")
+                .map((f) => ({ name: f, size: statSync(FIXTURES + f).size, mtime: statSync(FIXTURES + f).mtimeMs }))
             : [];
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(files));
+          return;
+        }
+        // /__fixtures/<name>/thumbnail → the thumbnail.png inside the .fig (for the file browser)
+        const thumb = /^([\w.-]+\.fig)\/thumbnail$/.exec(name);
+        if (thumb && existsSync(FIXTURES + thumb[1])) {
+          try {
+            const png = unzipSync(readFileSync(FIXTURES + thumb[1]), { filter: (f) => f.name === "thumbnail.png" })["thumbnail.png"];
+            if (png) {
+              res.setHeader("Content-Type", "image/png");
+              res.end(png);
+              return;
+            }
+          } catch {
+            // not a ZIP-wrapped .fig: no thumbnail
+          }
+          res.statusCode = 404;
+          res.end();
           return;
         }
         if (!/^[\w.-]+\.fig$/.test(name) || !existsSync(FIXTURES + name)) {

@@ -20,6 +20,8 @@ export interface RenderOptions {
   marquee?: Rect | null;
   /** Nodes not drawn by the scene (e.g. text being edited in an overlay). */
   hidden?: ReadonlySet<NodeId>;
+  /** Frame name labels above top-level frames (default true). */
+  labels?: boolean;
 }
 
 export type HandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -78,7 +80,7 @@ export class Renderer {
 
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.drawFrameLabels(ctx, pageId, view, opts);
+    if (opts.labels !== false) this.drawFrameLabels(ctx, pageId, view, opts);
     if (opts.hover && !opts.selection?.has(opts.hover)) this.outline(ctx, opts.hover, view, 1);
     for (const id of opts.selection ?? []) this.outline(ctx, id, view, 1.5);
     if (opts.handles && opts.selection?.size === 1) this.drawHandles(ctx, [...opts.selection][0]!, view);

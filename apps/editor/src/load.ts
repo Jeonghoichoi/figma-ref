@@ -1,4 +1,4 @@
-import { decodeFig, documentToFig, encodeFig, figToDocument, type FigFile } from "@figref/fig-format";
+import { decodeFig, figToDocument, type FigFile } from "@figref/fig-format";
 import type { Document } from "@figref/model";
 
 export interface Loaded {
@@ -21,15 +21,13 @@ export function decodeImages(doc: Document, onImage: (hash: string, bitmap: Imag
   }
 }
 
-export function saveFig(loaded: Loaded): void {
-  const bytes = encodeFig(documentToFig(loaded.doc));
-  const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
-  const a = Object.assign(document.createElement("a"), { href: url, download: loaded.name.replace(/(\.fig)?$/, "-figref.fig") });
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+export interface Fixture {
+  name: string;
+  size: number;
+  mtime: number;
 }
 
-export async function listFixtures(): Promise<{ name: string; size: number }[]> {
+export async function listFixtures(): Promise<Fixture[]> {
   try {
     const res = await fetch("/__fixtures");
     return res.ok ? await res.json() : [];

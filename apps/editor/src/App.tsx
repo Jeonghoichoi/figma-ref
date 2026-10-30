@@ -4,9 +4,13 @@ import type { NodeId } from "@figref/model";
 import { rgba, type ImageSource, type Viewport as View } from "@figref/renderer";
 import { Editor, type Tool } from "./editor/Editor";
 import { useEditor } from "./editor/useEditor";
+import { createFig, download, importFig, openStored, persist, type OpenFile } from "./home/files";
+import { Home } from "./home/Home";
+import { getBytes, getFile, listFiles, rememberSchema, renameFile } from "./home/library";
+import type { Preset } from "./home/presets";
 import { Inspector } from "./Inspector";
 import { LayerPanel } from "./LayerPanel";
-import { decodeImages, fetchFixture, listFixtures, loadFig, saveFig, type Loaded } from "./load";
+import { decodeImages, fetchFixture, listFixtures, type Fixture } from "./load";
 import { Viewport, type ViewportHandle } from "./Viewport";
 
 const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
@@ -19,98 +23,181 @@ const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: "text", label: "텍스트", key: "T", icon: "T" },
 ];
 const TOOL_KEYS: Record<string, Tool> = { v: "select", h: "hand", f: "frame", a: "frame", r: "rectangle", o: "ellipse", l: "line", t: "text" };
+const AUTOSAVE_MS = 1500;
+
+type SaveState = "saved" | "saving" | "unsaved";
 
 export function App() {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [open, setOpen] = useState<OpenFile | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [fixtures, setFixtures] = useState<{ name: string; size: number }[]>([]);
+  const [fixtures, setFixtures] = useState<Fixture[]>([]);
+  const [libraryVersion, setLibraryVersion] = useState(0);
   const [view, setView] = useState<View>({ zoom: 1, x: 0, y: 0 });
   const [editingText, setEditingText] = useState<NodeId | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("saved");
   const images = useRef(new Map<string, ImageSource>());
   const [imagesVersion, setImagesVersion] = useState(0);
-  const [dragOver, setDragOver] = useState(false);
   const viewport = useRef<ViewportHandle>(null);
+  const focusOnLoad = useRef(new URLSearchParams(location.search).get("node"));
 
   useEffect(() => {
     listFixtures().then(setFixtures);
   }, []);
 
-  const open = useCallback(async (name: string, getBytes: () => Promise<Uint8Array>) => {
+  const fail = (what: string, e: unknown) => {
+    console.error(e);
+    setError(`${what}: ${(e as Error).message}`);
+  };
+
+  /** Runs a file-producing step with a busy toast, then opens the result in the editor. */
+  const openWith = useCallback(async (label: string, produce: () => Promise<OpenFile>) => {
     setError(null);
-    setBusy(`${name} 여는 중…`);
+    setBusy(label);
     try {
-      const bytes = await getBytes();
-      await new Promise((r) => setTimeout(r, 0)); // let the "opening" state paint
+      await new Promise((r) => setTimeout(r, 0)); // let the toast paint before heavy decoding
       const t0 = performance.now();
-      const next = loadFig(name, bytes);
-      console.info(`[figref] ${name}: decoded ${next.doc.nodes.size} nodes in ${Math.round(performance.now() - t0)} ms`);
+      const next = await produce();
+      console.info(`[figref] ${next.file.name}: ${next.doc.nodes.size} nodes in ${Math.round(performance.now() - t0)} ms`);
+      await rememberSchema(next.fig);
       images.current = new Map();
       decodeImages(next.doc, (hash, bmp) => {
         images.current.set(hash, bmp);
         setImagesVersion((v) => v + 1);
       });
       const firstPage = [...next.doc.nodes.values()].find((n) => n.type === "CANVAS" && !n.raw?.internalOnly);
-      setLoaded(next);
+      setOpen(next);
       setEditor(new Editor(next.doc, firstPage?.id ?? next.doc.rootId));
       setEditingText(null);
+      setSaveState("saved");
+      history.replaceState(null, "", `${location.pathname}${location.search}#file=${next.file.id}`);
     } catch (e) {
-      console.error(e);
-      setError(`${name}: ${(e as Error).message}`);
+      fail(label.replace(/ 중…$/, ""), e);
     } finally {
       setBusy(null);
+      setLibraryVersion((v) => v + 1);
     }
   }, []);
 
-  // ?open=<fixture name>[&node=<id>] opens a local sample directly (dev server only).
-  const focusOnLoad = useRef(new URLSearchParams(location.search).get("node"));
+  const onNew = (preset: Preset | null) => openWith("새 파일 만드는 중…", () => createFig(preset));
+  const onImport = (file: File) =>
+    openWith(`${file.name} 가져오는 중…`, async () => importFig(file.name, new Uint8Array(await file.arrayBuffer()), "import"));
+  const onOpenStored = (id: string) =>
+    openWith("여는 중…", async () => {
+      const [file, bytes] = await Promise.all([getFile(id), getBytes(id)]);
+      if (!file || !bytes) throw new Error("라이브러리에서 파일을 찾을 수 없습니다");
+      return openStored(file, bytes);
+    });
+  // A sample opens its existing library copy if there is one (edits live there), else imports a copy.
+  const onOpenSample = (name: string) =>
+    openWith(`${name} 여는 중…`, async () => {
+      const copy = (await listFiles()).find((f) => f.origin === "sample" && f.name === name.replace(/\.fig$/, ""));
+      const bytes = copy && (await getBytes(copy.id));
+      return copy && bytes ? openStored(copy, bytes) : importFig(name, await fetchFixture(name), "sample");
+    });
+
+  // Initial route: #file=<id> reopens a library file (survives reloads); ?open=<fixture> opens a sample.
   useEffect(() => {
-    const name = new URLSearchParams(location.search).get("open");
-    if (name) open(name, () => fetchFixture(name));
-  }, [open]);
+    const id = /#file=([\w-]+)/.exec(location.hash)?.[1];
+    const sample = new URLSearchParams(location.search).get("open");
+    if (id) onOpenStored(id);
+    else if (sample) onOpenSample(sample);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const id = focusOnLoad.current;
     if (editor && id && editor.doc.nodes.has(id)) editor.select([id]);
   }, [editor]);
 
+  // ---- saving ----------------------------------------------------------------
+
+  const saving = useRef<Promise<void> | null>(null);
+  const save = useCallback(async (): Promise<Uint8Array | null> => {
+    if (!open || !editor) return null;
+    await saving.current; // one save at a time
+    let bytes: Uint8Array | null = null;
+    const run = (async () => {
+      editor.dirty = false; // edits made while saving mark it dirty again
+      setSaveState("saving");
+      try {
+        const result = await persist(open, editor, images.current);
+        bytes = result.bytes;
+        setOpen((o) => (o && o.file.id === result.file.id ? { ...o, file: result.file } : o));
+        setSaveState(editor.dirty ? "unsaved" : "saved");
+      } catch (e) {
+        editor.dirty = true;
+        setSaveState("unsaved");
+        fail("저장 실패", e);
+      }
+    })();
+    saving.current = run;
+    await run;
+    return bytes;
+  }, [open, editor]);
+
+  // Autosave shortly after the last edit.
+  useEffect(() => {
+    if (!editor) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = editor.subscribe(() => {
+      if (!editor.dirty) return;
+      setSaveState("unsaved");
+      clearTimeout(timer);
+      timer = setTimeout(() => void save(), AUTOSAVE_MS);
+    });
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
+  }, [editor, save]);
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (editor?.dirty || saveState === "saving") e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [editor, saveState]);
+
+  const goHome = async () => {
+    if (editor?.dirty) await save();
+    else await saving.current;
+    setOpen(null);
+    setEditor(null);
+    setEditingText(null);
+    history.replaceState(null, "", location.pathname);
+    setLibraryVersion((v) => v + 1);
+  };
+
+  const exportFig = async () => {
+    const bytes = await save();
+    if (bytes && open) download(open.file.name, bytes);
+  };
+
+  const rename = async (name: string) => {
+    if (!open || !name.trim() || name === open.file.name) return;
+    await renameFile(open.file.id, name.trim());
+    setOpen({ ...open, file: { ...open.file, name: name.trim() } });
+  };
+
   // Dev-only handle for console debugging and browser-driven tests.
   useEffect(() => {
-    if (!import.meta.env.DEV || !editor || !loaded) return;
+    if (!import.meta.env.DEV || !editor || !open) return;
     (window as any).__figref = {
       editor,
-      loaded,
+      open,
+      save,
       /** Saves to .fig bytes and reopens them, like a save + reload would. */
       roundtrip: () => {
         const bytes = encodeFig(documentToFig(editor.doc));
         return { bytes: bytes.length, doc: figToDocument(decodeFig(bytes)) };
       },
     };
-  }, [editor, loaded]);
+  }, [editor, open, save]);
 
-  const openFile = (file: File) => open(file.name, async () => new Uint8Array(await file.arrayBuffer()));
-
-  const save = useCallback(() => {
-    if (!loaded || !editor) return;
-    try {
-      saveFig(loaded);
-      editor.dirty = false;
-      editor.preview();
-    } catch (e) {
-      console.error(e);
-      setError(`저장 실패: ${(e as Error).message}`);
-    }
-  }, [loaded, editor]);
-
-  // Warn before leaving with unsaved edits.
-  useEffect(() => {
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (editor?.dirty) e.preventDefault();
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [editor]);
+  // ---- shortcuts ------------------------------------------------------------------
 
   useEffect(() => {
     if (!editor) return;
@@ -126,7 +213,7 @@ export function App() {
 
       if (mod && key === "z") return run(() => (e.shiftKey ? editor.redo() : editor.undo()));
       if (mod && key === "y") return run(() => editor.redo());
-      if (mod && key === "s") return run(save);
+      if (mod && key === "s") return run(() => void save());
       if (mod && key === "d") return run(() => editor.duplicate());
       if (mod && key === "c") return run(() => editor.copy());
       if (mod && key === "x") return run(() => { editor.copy(); editor.deleteSelection(); });
@@ -175,77 +262,70 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [editor, save]);
 
+  // ---- render ---------------------------------------------------------------------
+
+  const toasts = (
+    <>
+      {busy && <div className="toast">{busy}</div>}
+      {error && <div className="toast error" onClick={() => setError(null)} title="닫기">{error}</div>}
+    </>
+  );
+
+  if (!editor || !open) {
+    return (
+      <div className="app">
+        <Home
+          fixtures={fixtures}
+          libraryVersion={libraryVersion}
+          onNew={onNew}
+          onImport={onImport}
+          onOpen={(f) => onOpenStored(f.id)}
+          onOpenSample={onOpenSample}
+        />
+        {toasts}
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`app${dragOver ? " dragover" : ""}`}
-      onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes("Files")) return;
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        if (!e.dataTransfer.files.length) return;
-        e.preventDefault();
-        setDragOver(false);
-        openFile(e.dataTransfer.files[0]!);
-      }}
-    >
+    <div className="app">
       <header className="toolbar">
-        <strong className="brand">figref</strong>
-        {editor && <Tools editor={editor} />}
-        <span className="divider" />
-        <label className="button">
-          열기
-          <input type="file" accept=".fig" hidden onChange={(e) => e.target.files?.[0] && openFile(e.target.files[0])} />
-        </label>
-        {fixtures.length > 0 && (
-          <select value="" onChange={(e) => e.target.value && open(e.target.value, () => fetchFixture(e.target.value))}>
-            <option value="">fixtures/ 샘플…</option>
-            {fixtures.map((f) => (
-              <option key={f.name} value={f.name}>{f.name} ({(f.size / 1e6).toFixed(1)} MB)</option>
-            ))}
-          </select>
-        )}
+        <button className="home-btn" onClick={goHome} title="홈으로 (최근 파일)">◆</button>
+        <Tools editor={editor} />
         <span className="spacer" />
-        {editor && loaded && <Status editor={editor} name={loaded.name} onSave={save} />}
-        {editor && (
-          <>
-            <button onClick={() => viewport.current?.zoomToFit()} title="Shift+1">전체 보기</button>
-            <span className="zoom">{Math.round(view.zoom * 100)}%</span>
-          </>
-        )}
+        <input
+          key={open.file.id + open.file.name}
+          className="title-input"
+          defaultValue={open.file.name}
+          title="파일 이름 바꾸기"
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          onBlur={(e) => void rename(e.target.value)}
+        />
+        <span className={`save-state ${saveState}`}>{saveState === "saved" ? "저장됨" : saveState === "saving" ? "저장 중…" : "편집됨"}</span>
+        <span className="spacer" />
+        <button onClick={exportFig} title="현재 문서를 .fig 파일로 다운로드">.fig 다운로드</button>
+        <button onClick={() => viewport.current?.zoomToFit()} title="Shift+1">전체 보기</button>
+        <span className="zoom">{Math.round(view.zoom * 100)}%</span>
       </header>
 
-      {editor && loaded ? (
-        <main className="workspace">
-          <LayerPanel editor={editor} onFocus={(id) => { editor.select([id]); viewport.current?.zoomTo(id); }} />
-          <div className="canvas-wrap">
-            <Viewport
-              ref={viewport}
-              editor={editor}
-              images={images.current}
-              imagesVersion={imagesVersion}
-              background={pageBackground(editor)}
-              editingText={editingText}
-              initialFocus={focusOnLoad.current}
-              onEditText={setEditingText}
-              onViewChange={setView}
-            />
-          </div>
-          <Inspector editor={editor} fileInfo={fileInfo(loaded, images.current.size)} />
-        </main>
-      ) : (
-        <main className="empty">
-          <div>
-            <h1>.fig 파일을 여기로 끌어다 놓으세요</h1>
-            <p>또는 위의 “열기”{fixtures.length ? " / fixtures 샘플" : ""}을 사용하세요.</p>
-          </div>
-        </main>
-      )}
-
-      {busy && <div className="toast">{busy}</div>}
-      {error && <div className="toast error" onClick={() => setError(null)}>{error}</div>}
+      <main className="workspace">
+        <LayerPanel editor={editor} onFocus={(id) => { editor.select([id]); viewport.current?.zoomTo(id); }} />
+        <div className="canvas-wrap">
+          <Viewport
+            ref={viewport}
+            editor={editor}
+            images={images.current}
+            imagesVersion={imagesVersion}
+            background={pageBackground(editor)}
+            editingText={editingText}
+            initialFocus={focusOnLoad.current}
+            onEditText={setEditingText}
+            onViewChange={setView}
+          />
+        </div>
+        <Inspector editor={editor} fileInfo={fileInfo(open, images.current.size)} />
+      </main>
+      {toasts}
     </div>
   );
 }
@@ -266,28 +346,18 @@ function Tools({ editor }: { editor: Editor }) {
   );
 }
 
-function Status({ editor, name, onSave }: { editor: Editor; name: string; onSave(): void }) {
-  useEditor(editor);
-  return (
-    <>
-      <span className="filename">{name}{editor.dirty ? " •" : ""}</span>
-      <button onClick={onSave} title="⌘S — 현재 문서를 .fig로 저장(다운로드)">.fig로 저장</button>
-    </>
-  );
-}
-
 function pageBackground(editor: Editor): string {
   const bg = editor.doc.nodes.get(editor.pageId)?.raw?.backgroundColor as { r: number; g: number; b: number; a: number } | undefined;
   return bg ? rgba(bg) : "#f5f5f5";
 }
 
-function fileInfo(loaded: Loaded, decodedImages: number): string {
+function fileInfo(open: OpenFile, decodedImages: number): string {
   return [
-    `이름     ${loaded.name}`,
-    `포맷     ${loaded.fig.magic} v${loaded.fig.version}`,
-    `압축     ${loaded.fig.compression.join(" / ")}`,
-    `스키마   정의 ${loaded.fig.schema.definitions.length}개`,
-    `노드     ${loaded.doc.nodes.size}개`,
-    `이미지   ${loaded.doc.images.size}개 (디코딩 ${decodedImages})`,
+    `이름     ${open.file.name}`,
+    `포맷     ${open.fig.magic} v${open.fig.version}`,
+    `압축     ${open.fig.compression.join(" / ")}`,
+    `스키마   정의 ${open.fig.schema.definitions.length}개`,
+    `노드     ${open.doc.nodes.size}개`,
+    `이미지   ${open.doc.images.size}개 (디코딩 ${decodedImages})`,
   ].join("\n");
 }
