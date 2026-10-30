@@ -38,7 +38,10 @@ export function sampleMessage(): Record<string, unknown> {
         parentIndex: { guid: guid(2), position: "Q" },
         type: "TEXT",
         name: "Label",
-        textData: { characters: "Hello\nWorld 🌍", lines: [0, 6] },
+        textData: {
+          characters: "Hello\nWorld 🌍",
+          lines: [0, 1].map(() => ({ lineType: "PLAIN", styleId: 0, indentationLevel: 0, sourceDirectionality: "AUTO", listStartOffset: 0, isFirstLineOfList: false })),
+        },
       },
     ],
     blobs: [{ bytes: new Uint8Array([1, 2, 3, 0, 255]) }, { bytes: new Uint8Array() }],

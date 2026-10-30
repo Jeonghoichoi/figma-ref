@@ -22,6 +22,67 @@ enum PaintType {
   IMAGE = 5;
 }
 
+enum NodePhase {
+  CREATED = 0;
+  REMOVED = 1;
+}
+
+enum BlendMode {
+  PASS_THROUGH = 0;
+  NORMAL = 1;
+  MULTIPLY = 3;
+}
+
+enum StrokeAlign {
+  CENTER = 0;
+  INSIDE = 1;
+  OUTSIDE = 2;
+}
+
+enum EffectType {
+  INNER_SHADOW = 0;
+  DROP_SHADOW = 1;
+}
+
+enum WindingRule {
+  NONZERO = 0;
+  ODD = 1;
+}
+
+enum ImageScaleMode {
+  STRETCH = 0;
+  FIT = 1;
+  FILL = 2;
+  TILE = 3;
+}
+
+enum NumberUnits {
+  RAW = 0;
+  PIXELS = 1;
+  PERCENT = 2;
+}
+
+enum TextAlignHorizontal {
+  LEFT = 0;
+  CENTER = 1;
+  RIGHT = 2;
+  JUSTIFIED = 3;
+}
+
+enum TextAlignVertical {
+  TOP = 0;
+  CENTER = 1;
+  BOTTOM = 2;
+}
+
+enum LineType {
+  PLAIN = 0;
+}
+
+enum SourceDirectionality {
+  AUTO = 0;
+}
+
 struct GUID {
   uint sessionID;
   uint localID;
@@ -39,6 +100,22 @@ struct Vector {
   float y;
 }
 
+struct FontName {
+  string family;
+  string style;
+  string postscript;
+}
+
+struct Number {
+  float value;
+  NumberUnits units;
+}
+
+struct ColorStop {
+  Color color;
+  float position;
+}
+
 struct Matrix {
   float m00;
   float m01;
@@ -53,16 +130,56 @@ message ParentIndex {
   string position = 2;
 }
 
+message Image {
+  byte[] hash = 1;
+  string name = 2;
+}
+
 message Paint {
   PaintType type = 1;
   Color color = 2;
   float opacity = 3;
   bool visible = 4;
+  BlendMode blendMode = 5;
+  ColorStop[] stops = 6;
+  Matrix transform = 7;
+  Image image = 8;
+  ImageScaleMode imageScaleMode = 9;
+}
+
+message Effect {
+  EffectType type = 1;
+  Color color = 2;
+  Vector offset = 3;
+  float radius = 4;
+  bool visible = 5;
+  BlendMode blendMode = 6;
+  float spread = 7;
+}
+
+message Path {
+  WindingRule windingRule = 1;
+  uint commandsBlob = 2;
+  uint styleID = 3;
+}
+
+message TextLineData {
+  LineType lineType = 1;
+  int styleId = 2;
+  int indentationLevel = 3;
+  SourceDirectionality sourceDirectionality = 4;
+  int listStartOffset = 5;
+  bool isFirstLineOfList = 6;
 }
 
 message TextData {
   string characters = 1;
-  uint[] lines = 2;
+  TextLineData[] lines = 2;
+  uint[] characterStyleIDs = 3;
+}
+
+message SymbolData {
+  GUID symbolID = 1;
 }
 
 message NodeChange {
@@ -79,6 +196,26 @@ message NodeChange {
   int cornerRadiusDelta = 11;
   int64 sessionTimestamp = 12;
   uint64 objectHash = 13;
+  NodePhase phase = 14;
+  bool locked = 15;
+  BlendMode blendMode = 16;
+  Paint[] strokePaints = 17;
+  float strokeWeight = 18;
+  StrokeAlign strokeAlign = 19;
+  Effect[] effects = 20;
+  float cornerRadius = 21;
+  bool frameMaskDisabled = 22;
+  bool resizeToFit = 23;
+  Path[] fillGeometry = 24;
+  Path[] strokeGeometry = 25;
+  float fontSize = 26;
+  FontName fontName = 27;
+  Number lineHeight = 28;
+  Number letterSpacing = 29;
+  float textTracking = 30;
+  TextAlignHorizontal textAlignHorizontal = 31;
+  TextAlignVertical textAlignVertical = 32;
+  SymbolData symbolData = 33;
 }
 
 message Blob {

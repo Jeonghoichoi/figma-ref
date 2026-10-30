@@ -16,48 +16,60 @@ export interface Color {
   r: number; g: number; b: number; a: number;
 }
 
+// Enum member names follow the .fig schema so the mapping layer stays a rename-free copy.
 export type BlendMode =
-  | "NORMAL" | "MULTIPLY" | "SCREEN" | "OVERLAY" | "DARKEN" | "LIGHTEN"
-  | "COLOR_DODGE" | "COLOR_BURN" | "HARD_LIGHT" | "SOFT_LIGHT"
-  | "DIFFERENCE" | "EXCLUSION" | "HUE" | "SATURATION" | "COLOR" | "LUMINOSITY"
-  | "PASS_THROUGH";
+  | "PASS_THROUGH" | "NORMAL"
+  | "DARKEN" | "MULTIPLY" | "LINEAR_BURN" | "COLOR_BURN"
+  | "LIGHTEN" | "SCREEN" | "LINEAR_DODGE" | "COLOR_DODGE"
+  | "OVERLAY" | "SOFT_LIGHT" | "HARD_LIGHT"
+  | "DIFFERENCE" | "EXCLUSION" | "HUE" | "SATURATION" | "COLOR" | "LUMINOSITY";
 
 export interface GradientStop {
   color: Color;
   position: number;
 }
 
+interface PaintBase {
+  opacity: number;
+  visible: boolean;
+  blendMode: BlendMode;
+  /**
+   * Original decoded paint. Fields we don't model (variable bindings, authored
+   * color space, thumbnails…) are carried over from here on save.
+   */
+  raw?: Record<string, unknown>;
+}
+
 export type Paint =
-  | { type: "SOLID"; color: Color; opacity: number; visible: boolean; blendMode: BlendMode }
-  | {
+  | (PaintBase & { type: "SOLID"; color: Color })
+  | (PaintBase & {
       type: "GRADIENT_LINEAR" | "GRADIENT_RADIAL" | "GRADIENT_ANGULAR" | "GRADIENT_DIAMOND";
       stops: GradientStop[];
+      /** Maps node-normalized space (0..1) into gradient space. */
       transform: Transform;
-      opacity: number;
-      visible: boolean;
-      blendMode: BlendMode;
-    }
-  | {
+    })
+  | (PaintBase & {
       type: "IMAGE";
       /** SHA-1 hex of the image bytes; resolves via Document.images. */
       imageHash: string;
       scaleMode: "FILL" | "FIT" | "TILE" | "STRETCH";
       transform: Transform;
-      opacity: number;
-      visible: boolean;
-      blendMode: BlendMode;
-    };
+    })
+  /** EMOJI, VIDEO, PATTERN, NOISE… — rendered as nothing, preserved via `raw`. */
+  | (PaintBase & { type: "UNKNOWN" });
 
-export type Effect = {
-  type: "DROP_SHADOW" | "INNER_SHADOW" | "LAYER_BLUR" | "BACKGROUND_BLUR";
+export interface Effect {
+  type: "DROP_SHADOW" | "INNER_SHADOW" | "FOREGROUND_BLUR" | "BACKGROUND_BLUR" | "UNKNOWN";
   visible: boolean;
   radius: number;
-  color?: Color;
-  offset?: Vec2;
-  spread?: number;
-};
+  color: Color;
+  offset: Vec2;
+  spread: number;
+  blendMode: BlendMode;
+  raw?: Record<string, unknown>;
+}
 
-export type WindingRule = "NONZERO" | "EVENODD";
+export type WindingRule = "NONZERO" | "ODD";
 
 /** Flattened path commands (absolute coords in node space). */
 export type PathCommand =
@@ -70,6 +82,8 @@ export type PathCommand =
 export interface Geometry {
   windingRule: WindingRule;
   commands: PathCommand[];
+  /** Index into the node's style override table (0 = node style). */
+  styleID?: number;
 }
 
 export type NodeType =
@@ -82,9 +96,11 @@ export type NodeType =
 export interface TextStyle {
   fontFamily: string;
   fontStyle: string;
+  /** PostScript name, e.g. "NotoSansKR-Black". */
+  fontPostscript: string;
   fontSize: number;
-  lineHeight?: { value: number; unit: "PIXELS" | "PERCENT" | "RAW" };
-  letterSpacing?: { value: number; unit: "PIXELS" | "PERCENT" };
+  lineHeight?: { value: number; units: "PIXELS" | "PERCENT" | "RAW" };
+  letterSpacing?: { value: number; units: "PIXELS" | "PERCENT" | "RAW" };
   textAlignHorizontal: "LEFT" | "CENTER" | "RIGHT" | "JUSTIFIED";
   textAlignVertical: "TOP" | "CENTER" | "BOTTOM";
 }
@@ -109,7 +125,7 @@ export interface Node {
   fills: Paint[];
   strokes: Paint[];
   strokeWeight: number;
-  strokeAlign: "CENTER" | "INSIDE" | "OUTSIDE";
+  strokeAlign: "CENTER" | "INSIDE" | "OUTSIDE" | "OFFSET";
   effects: Effect[];
   cornerRadius: number;
   clipsContent: boolean;

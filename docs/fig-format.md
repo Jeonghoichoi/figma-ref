@@ -155,12 +155,53 @@ region  × R: ❓ (샘플에 region이 0개라 아직 미해독)
 | 파일 크기 | 16,019,391 → 16,019,439 바이트 (메시지 압축이 zstd에서 deflate로 바뀐 영향) |
 | 재인코딩 파일을 Figma에서 열기 | ⏳ `fixtures/out/sample-roundtrip.fig` 로 수동 확인 필요 |
 
-## 5. 개인정보 주의
+## 5. 모델 매핑 규칙 (3단계)
+
+구현: [packages/fig-format/src/mapping/](../packages/fig-format/src/mapping/)
+
+**원칙:** 저장할 때 원본 NodeChange(`node.raw`)를 그대로 깔고, *모델 값이 원본에서 디코딩한 값과 다른 필드만* 다시 쓴다.
+→ 편집하지 않은 노드는 원본 메시지와 완전히 같고(실제 샘플 3개에서 `nodeChanges`와 `blobs` 모두 일치 ✅), 모델에 없는 필드는 편집 후에도 남는다.
+
+| 모델 | `.fig` | 비고 |
+|---|---|---|
+| `id` | `guid` → `"sessionID:localID"` | |
+| `parentId`, `position` | `parentIndex { guid, position }` | |
+| `type: GROUP` | `FRAME` + `resizeToFit: true` + 채우기 없음 | 🟡 샘플 6개 모두 맞음 |
+| `clipsContent` | `!frameMaskDisabled` (FRAME/SYMBOL/INSTANCE/SECTION) | 필드가 없으면 false로 본다 = 클리핑함 |
+| `fills` / `strokes` | `fillPaints` / `strokePaints` | 페인트마다 `raw`를 보존 |
+| `effects` | `effects` | `FOREGROUND_BLUR` = 레이어 블러 |
+| `fillGeometry` / `strokeGeometry` | `Path[]` + `blobs[commandsBlob]` | 바뀌지 않은 경로는 기존 blob 인덱스를 그대로 쓴다 |
+| `text.characters` | `textData.characters` | |
+| `text.style` | `fontName`, `fontSize`, `lineHeight`, `letterSpacing`, `textAlign*` | |
+| `componentId` | `symbolData.symbolID` | INSTANCE (샘플 없음 ❓) |
+
+### 편집했을 때 함께 지우는 파생 데이터
+
+어떤 값이 바뀌면, 그 값에서 파생된 데이터가 새 값과 모순되지 않도록 함께 지운다.
+
+| 바뀐 값 | 함께 지우는 것 |
+|---|---|
+| 페인트 색 | `authoredColor`, `colorVar` |
+| 그라디언트 정지점 | `stopsVar`, `authoredStops`, `gradientVar` |
+| 이미지 해시 | `imageThumbnail`, `thumbHash*`, `originalImageWidth/Height`, `imageVar` |
+| 텍스트 내용·스타일 | `derivedTextData`, `textData`의 레이아웃 결과(glyphs, baselines 등) |
+
+- 텍스트 내용이 바뀌면 문단 수에 맞춰 `textData.lines`를 다시 만든다. `characterStyleIDs`는 스타일이 하나뿐이면 새 길이로 늘리고, 섞여 있으면 지운다.
+- 자간이 PERCENT 단위면 `textTracking = value / 100`으로 함께 맞춘다 (샘플: 5% ↔ 0.05) 🟡
+
+### 검증이 남은 가설 (7단계)
+
+- ⏳ 레이아웃 결과(`derivedTextData`)를 지운 텍스트를 원본 앱이 다시 배치해 주는지
+- ⏳ 편집한 파일이 원본 앱에서 열리는지: `fixtures/out/*-edited.fig` (별 색상을 빨간색으로 바꾼 버전)
+- 노드를 삭제하면 `nodeChanges`에서 뺀다. 스키마에 `phase: REMOVED`가 있지만 저장 파일에서는 쓰이지 않는 것으로 보인다 🟡
+- 새 문서는 스키마가 필요하므로, 기존 `.fig` 하나를 base로 받아서 그 스키마를 쓴다 (스키마 파일은 저장소에 넣지 않음)
+
+## 6. 개인정보 주의
 
 `editInfo.userId`, `lastEditedAt` 같은 편집자 정보가 노드마다 들어 있다.
 `fixtures/out/`의 덤프 파일에도 그대로 포함되므로 공유하지 말 것 (`.gitignore`로 제외되어 있음).
 
-## 분석 도구 사용법
+## 7. 분석 도구 사용법
 
 ```bash
 pnpm inspect fixtures/<name>.fig --out fixtures/out/<name> --roundtrip

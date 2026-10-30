@@ -11,9 +11,9 @@
 
 | 단계 | 내용 | 산출물 |
 |---|---|---|
-| 1 | 구조 설계 | 이 문서, 모노레포, `@figref/model` |
-| 2 | 포맷 리버스 엔지니어링 | `@figref/kiwi`, `@figref/fig-format`, `tools/fig-inspect`, [fig-format.md](fig-format.md) |
-| 3 | 파서/시리얼라이저 | `.fig` NodeChange ⇄ 내부 모델 매핑 (`@figref/fig-format/mapping`) |
+| 1 | 구조 설계 ✅ | 이 문서, 모노레포, `@figref/model` |
+| 2 | 포맷 리버스 엔지니어링 ✅ | `@figref/kiwi`, `@figref/fig-format`, `tools/fig-inspect`, [fig-format.md](fig-format.md) |
+| 3 | 파서/시리얼라이저 ✅ | `.fig` NodeChange ⇄ 내부 모델 매핑 ([mapping/](../packages/fig-format/src/mapping/)) |
 | 4 | 렌더링 엔진 | `@figref/renderer` (Canvas2D) |
 | 5 | 에디터 | `apps/editor` (React + Vite) |
 | 6 | 고급 기능 | 오토 레이아웃, 컴포넌트/인스턴스, 제약, SVG/PNG 내보내기 |
